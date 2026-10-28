@@ -261,6 +261,15 @@ body.guided .saved{display:none}
 .confirm{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:12px;padding:10px 12px;
   background:#fdf5f4;border:1px solid var(--red);border-radius:3px;font-size:14px}
 .confirm span{flex:1 1 220px;color:var(--ink)}
+.calc{margin-top:12px;padding:10px 12px;border:1px solid #e3e6ef;border-left:4px solid var(--brand-2);background:#f5f6fa;
+  border-radius:3px;font-size:14px;line-height:1.45;color:var(--ink-2)}
+.calc b{color:var(--ink)}
+.calc .num{font-family:var(--mono);font-weight:600;color:var(--brand)}
+.calc.ok{border-left-color:var(--green);background:#f1faf5}
+.calc.ok .veredito{color:var(--green);font-weight:600}
+.calc.nc{border-left-color:var(--red);background:#fdf5f4}
+.calc.nc .veredito{color:var(--red);font-weight:600}
+.calc .ref{display:block;margin-top:4px;font-size:12px;color:var(--muted)}
 .envio{margin:4px 0 6px;padding:12px;background:#f5f6fa;border:1px solid #e3e6ef;border-radius:3px;
   display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center}
 .envio button{min-height:50px;font-size:17px;padding:10px 20px}
@@ -431,13 +440,15 @@ body.guided .sub{display:none}
    Tipos de campo: {u:"V"} número com unidade · {opts:[...]} lista ·
    {long:true} texto ditável · {t:"date"} data · sem nada = texto curto.
    ===================================================================== */
+const OS_INICIAL = 27; // primeira OS gerada automaticamente: 0027
 const IDENT = [
   {k:"posto", l:"Posto / local", ph:"Nome e cidade"},
-  {k:"os", l:"OS nº"},
+  {k:"os", l:"OS nº", ph:"0027", hint:"Gerado automaticamente a partir de 0027. Pode corrigir se a Turbo passou outro número."},
   {k:"data", l:"Data da vistoria", t:"date"},
   {k:"exec", l:"Executor (Parceiro A)", ph:"Quem vistoria"},
   {k:"fiscal", l:"Fiscal Técnico (Turbo)"},
-  {k:"carregador", l:"Carregador (modelo e potência)", ph:"ex.: 60 kW, 2 vagas"},
+  {k:"carregador", l:"Modelo do carregador", ph:"ex.: DC 60 kW, 2 vagas"},
+  {k:"pot", l:"Potência do carregador", u:"kW"},
   {k:"contato", l:"Contato no posto", ph:"Nome e telefone"},
   {k:"gps", l:"Coordenadas GPS (no ponto do totem)", ph:"-23.550520, -46.633308", gps:true}
 ];
@@ -480,14 +491,17 @@ const SECOES = [
        {k:"i2_mod", l:"Módulos DIN livres", u:"un"},
        {k:"i2_estado", l:"Estado do quadro", opts:["Bom","Precisa de reparo","Precisa ser trocado"]}
      ]},
-    {id:"i3",
-     q:"A energia do posto aguenta o carregador ou vai precisar de mais carga?",
-     como:"Compare a potência do carregador (na OS) com o disjuntor geral e com a demanda contratada da última conta de energia. Pergunte se já existe pedido de aumento de carga ou transformador.",
-     ok:"Dados coletados para o projetista decidir. Se já estiver claro que não atende, marque Não conforme e explique.",
-     foto:"Conta de energia (página com demanda contratada e número da unidade consumidora) e o transformador ou cabine, se existir.",
+    {id:"i3", calc:true,
+     q:"Quantos amperes sobram para o carregador?",
+     como:"Com o alicate amperímetro, meça a corrente de cada fase no disjuntor geral, com o posto funcionando normalmente (bombas, compressores e geladeiras ligados). Anote a demanda contratada da última conta de energia. O cálculo abaixo usa o disjuntor geral do item 1.2 e a potência do carregador da identificação.",
+     ok:"Correntes das fases medidas e a corrente disponível cobre o que o carregador precisa. Se não cobrir, marque Não conforme: vai precisar de aumento de carga ou transformador.",
+     foto:"Display do alicate amperímetro em cada fase e a conta de energia (página com demanda contratada e número da unidade consumidora).",
      campos:[
+       {k:"i3_ia", l:"Corrente medida fase A", u:"A"},
+       {k:"i3_ib", l:"Corrente medida fase B", u:"A"},
+       {k:"i3_ic", l:"Corrente medida fase C", u:"A"},
        {k:"i3_dem", l:"Demanda contratada", u:"kW"},
-       {k:"i3_aval", l:"Sua avaliação", opts:["Parece atender","Precisa de aumento de carga","Precisa de transformador","Projetista precisa avaliar"]}
+       {k:"i3_aval", l:"Sua avaliação", opts:["Atende","Precisa de aumento de carga","Precisa de transformador","Projetista precisa avaliar"]}
      ]},
     {id:"i4",
      q:"Como está o aterramento?",
@@ -611,7 +625,9 @@ const CAM = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3 7.2 5H4a2
 function campo(f){
   const id = f.k, ph = f.ph ? ` placeholder="${esc(f.ph)}"` : "";
   const lbl = `<label for="${id}">${esc(f.l)}</label>`;
+  const hint = f.hint ? `<p class="hint">${esc(f.hint)}</p>` : "";
   if(f.t === "date") return `<div class="f">${lbl}<input type="date" id="${id}" data-k="${id}"></div>`;
+  if(f.hint && !f.u && !f.opts) return `<div class="f">${lbl}<input type="text" id="${id}" data-k="${id}"${ph}>${hint}</div>`;
   if(f.opts) return `<div class="f">${lbl}<select id="${id}" data-k="${id}"><option value="">— escolha —</option>${
     f.opts.map(o => `<option>${esc(o)}</option>`).join("")}</select></div>`;
   if(f.u) return `<div class="f unit">${lbl}<input type="text" inputmode="decimal" class="num" id="${id}" data-k="${id}"${ph}><em>${esc(f.u)}</em></div>`;
@@ -638,6 +654,7 @@ function itemHTML(sec, it, idx, mini){
     <div class="col-b">
       <div class="seg" role="radiogroup" aria-label="Situação do item">${seg}</div>
       ${it.campos && it.campos.length ? `<div class="grid campos">${it.campos.map(campo).join("")}</div>` : ""}
+      ${it.calc ? `<div class="calc" id="calc-${it.id}"></div>` : ""}
       <div class="att">
         <span class="lbl">Fotos e anexos${it.ev === false ? " (opcional)" : ""}</span>
         <div class="att-row">
@@ -742,8 +759,70 @@ function calcular(){
   return {ok, nc, na, base, pct, pend, ncs, semFoto, status, sub, note, cls};
 }
 
+/* corrente disponível para o carregador (item 1.3) */
+const num = v => { const n = parseFloat(String(v ?? "").trim().replace(",", ".")); return isFinite(n) ? n : null; };
+const fmtN = n => n === null ? "" : (Math.round(n * 10) / 10).toLocaleString("pt-BR");
+function calcularAmperes(d){
+  d = d || coletar();
+  const disj = num(d.i2_disj);
+  const fases = [num(d.i3_ia), num(d.i3_ib), num(d.i3_ic)].filter(x => x !== null);
+  const maior = fases.length ? Math.max(...fases) : null;
+  const disponivel = (disj !== null && maior !== null) ? disj - maior : null;
+  const pot = num(d.pot);
+  const vff = num(d.i1_ff) || 380, vfn = num(d.i1_fn) || 220;
+  const lig = d.i1_lig || "";
+  let precisa = null, base = "";
+  if(pot !== null && pot > 0){
+    if(lig === "Monofásica"){ precisa = pot * 1000 / vfn; base = `monofásico, ${fmtN(vfn)} V`; }
+    else if(lig === "Bifásica"){ precisa = pot * 1000 / vff; base = `bifásico, ${fmtN(vff)} V`; }
+    else { precisa = pot * 1000 / (Math.sqrt(3) * vff); base = `trifásico, ${fmtN(vff)} V${lig ? "" : " (suposto)"}`; }
+  }
+  const folga = (disponivel !== null && precisa !== null) ? disponivel - precisa : null;
+  return {disj, maior, disponivel, pot, precisa, base, folga};
+}
+function renderCalc(){
+  const box = $("#calc-i3"); if(!box) return;
+  const a = calcularAmperes();
+  box.classList.remove("ok", "nc");
+  let html = "";
+  if(a.disponivel === null){
+    html = `<b>Corrente disponível:</b> preencha o disjuntor geral (item 1.2) e pelo menos uma corrente medida para calcular.`;
+  } else {
+    html = `Disjuntor geral <span class="num">${fmtN(a.disj)} A</span> − maior corrente medida <span class="num">${fmtN(a.maior)} A</span> = <b><span class="num">${fmtN(a.disponivel)} A</span> disponíveis</b> para o carregador.`;
+  }
+  if(a.precisa !== null){
+    html += `<br>O carregador de ${fmtN(a.pot)} kW (${a.base}) precisa de cerca de <span class="num">${fmtN(a.precisa)} A</span>.`;
+    if(a.folga !== null){
+      if(a.folga >= 0){ box.classList.add("ok"); html += ` <span class="veredito">Cobre, com folga de ${fmtN(a.folga)} A.</span>`; }
+      else { box.classList.add("nc"); html += ` <span class="veredito">Faltam ${fmtN(-a.folga)} A: precisa de aumento de carga ou transformador.</span>`; }
+    }
+  } else {
+    html += `<br>Informe a potência do carregador (kW) na identificação para comparar com o que ele precisa.`;
+  }
+  html += `<span class="ref">Estimativa de campo (corrente ≈ kW × 1000 ÷ (√3 × V) no trifásico). O projetista confirma com a demanda contratada e os cabos.</span>`;
+  box.innerHTML = html;
+}
+
+/* numeração automática da OS (0027, 0028, …) */
+const LS_OS = "turbo.chk03.v3.proximaOS";
+const pad4 = n => String(n).padStart(4, "0");
+const osNum = s => { const n = parseInt(String(s ?? "").replace(/\D/g, ""), 10); return isFinite(n) ? n : null; };
+function proximaOSLocal(){ const v = parseInt(LS.get(LS_OS) || "", 10); return isFinite(v) && v >= OS_INICIAL ? v : OS_INICIAL; }
+function consumirOS(os){ const n = osNum(os); if(n !== null && n >= proximaOSLocal()) LS.set(LS_OS, String(n + 1)); }
+async function preencherOS(){
+  const el = $("#os"); if(!el || el.value.trim()) return;
+  let n = proximaOSLocal();
+  if(MODO !== "file"){
+    try{ const r = await chamar("proximaOS"); const s = r && osNum(r.os); if(s !== null && s > n) n = s; }catch(e){}
+  }
+  if(el.value.trim()) return;
+  el.value = pad4(n);
+  salvar();
+}
+
 function atualizar(){
   const r = calcular();
+  renderCalc();
   ITEMS.forEach(it => {
     const v = situacao(it.id), row = $("#row-" + it.id);
     row.classList.toggle("ok", v === "ok");
@@ -1077,6 +1156,7 @@ window.addEventListener("afterprint", () => { if(ui.guided) document.body.classL
 async function exportar(){
   salvar();
   const d = coletar();
+  consumirOS(d.os);
   d._id = vid();
   d._anexos = anexos;
   d._meta = {checklist:"CHK-03 · Levantamento técnico local · rev. 3", exportado:new Date().toISOString(), itens:ITEMS.length};
@@ -1124,6 +1204,7 @@ function montarLinha(d, r){
   L["Status"] = r.status; L["% conforme"] = r.pct;
   L["Posto"] = d.posto || ""; L["OS"] = d.os || ""; L["Data da vistoria"] = d.data || "";
   L["Executor"] = d.exec || ""; L["Fiscal Técnico"] = d.fiscal || ""; L["Carregador"] = d.carregador || "";
+  L["Potência do carregador (kW)"] = d.pot || "";
   L["Contato no posto"] = d.contato || ""; L["GPS"] = d.gps || "";
   L["Conformes"] = r.ok; L["Não conformes"] = r.nc; L["Pendentes"] = r.pend.length; L["N/A"] = r.na; L["Sem foto"] = r.semFoto.length;
   L["Itens não conformes"] = r.ncs.map(it => NUM[it.id]).join(", ");
@@ -1135,6 +1216,11 @@ function montarLinha(d, r){
     (it.campos || []).forEach(f => { L[n + " " + f.l + (f.u ? " (" + f.u + ")" : "")] = d[f.k] || ""; });
     L[n + " observações"] = d[it.id + "_ob"] || "";
   });
+  const a = calcularAmperes(d);
+  L["1.3 Maior corrente medida (A)"] = a.maior === null ? "" : Math.round(a.maior * 10) / 10;
+  L["1.3 Corrente disponível (A)"] = a.disponivel === null ? "" : Math.round(a.disponivel * 10) / 10;
+  L["1.3 Corrente que o carregador precisa (A)"] = a.precisa === null ? "" : Math.round(a.precisa * 10) / 10;
+  L["1.3 Folga (A)"] = a.folga === null ? "" : Math.round(a.folga * 10) / 10;
   GATE.forEach(g => { L[g.l] = d[g.k] || ""; });
   return L;
 }
@@ -1143,6 +1229,10 @@ function chamar(fn, ...args){
     return new Promise((res, rej) => google.script.run.withSuccessHandler(res).withFailureHandler(e => rej(e))[fn](...args));
   }
   if(ENDPOINT){
+    if(fn === "proximaOS"){
+      return fetch(ENDPOINT + (ENDPOINT.includes("?") ? "&" : "?") + "acao=proximaOS").then(x => x.json())
+        .then(j => { if(!j || !j.ok) throw new Error((j && j.erro) || "resposta inválida"); return j; });
+    }
     const body = fn === "salvarFotos" ? {id:args[0], rotulo:args[1], item:args[2], fotos:args[3]} : args[0];
     return fetch(ENDPOINT, {method:"POST", body:JSON.stringify(body)}).then(x => x.json())
       .then(j => { if(!j || !j.ok) throw new Error((j && j.erro) || "resposta inválida"); return j; });
@@ -1175,6 +1265,11 @@ async function enviarVistoria(){
   try{
     st.textContent = "Enviando respostas…";
     const res = await chamar("salvarVistoria", p);
+    if(res && res.os && osNum(res.os) !== osNum(d.os)){
+      $("#os").value = res.os; salvar();
+      msg(`Nº da OS ajustado para ${res.os}: o anterior já estava em uso por outra vistoria.`, true);
+    }
+    consumirOS((res && res.os) || d.os);
     for(let i = 0; i < comFotos.length; i++){
       st.textContent = `Enviando fotos do item ${NUM[comFotos[i].id]} (${i+1} de ${comFotos.length})…`;
       await chamar("salvarFotos", id, p.rotulo, NUM[comFotos[i].id], anexos[comFotos[i].id]);
@@ -1202,7 +1297,7 @@ async function limparTudo(perguntar){
   atualizar(); mapaGPS(); return true;
 }
 $("#clear").addEventListener("click", async () => {
-  if(await limparTudo(true)){ $("#data").value = hoje(); salvar(); msg("Checklist limpo."); if(ui.guided) mostrarPasso(0); }
+  if(await limparTudo(true)){ $("#data").value = hoje(); salvar(); msg("Checklist limpo."); if(ui.guided) mostrarPasso(0); preencherOS(); }
 });
 $("#import").addEventListener("change", async e => {
   const f = e.target.files[0]; e.target.value = "";
@@ -1237,6 +1332,7 @@ $("#import").addEventListener("change", async e => {
   setGuiado(guiado, true);
   atualizar(); mapaGPS();
   if(bruto) msg("Preenchimento anterior restaurado.");
+  preencherOS();
   if(MODO === "web" && !ENDPOINT){
     $("#envio").hidden = true;
     $("#hint-gas").textContent = "Este checklist ainda não está ligado a uma planilha. Ao terminar, toque em Compartilhar / baixar dossiê e mande o arquivo ao Fiscal Técnico pelo WhatsApp; ele abre este mesmo link e usa Carregar dossiê.";
