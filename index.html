@@ -615,7 +615,7 @@ const GATE = [
 const MODO = "web";            // "file" = arquivo HTML · "art" = link no claude.ai · "gas" = app da Web no Google (planilha)
 const ARTIFACT = MODO === "art";
 const EMBUTIDO = MODO === "art" || MODO === "gas"; // dentro do claude.ai ou do Google não há microfone, GPS nem impressão
-const ENDPOINT = ""; // modo "web": cole entre as aspas a URL do app da Web do Google (termina em /exec)
+const ENDPOINT = "https://script.google.com/macros/s/AKfycbxuNJW1WP-D0Kc5rmUMj2Lm0oASaIHCLLHWMeGjT_GKIz6dVNj3N2RbyCz4-iBZbs_Daw/exec"; // modo "web": cole entre as aspas a URL do app da Web do Google (termina em /exec)
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const MIC = EMBUTIDO ? "" : `<button type="button" class="mic" data-mic aria-label="Ditar por voz" title="Ditar por voz">
